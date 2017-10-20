@@ -1080,10 +1080,10 @@ class Worker:
             self.empty_visits = 0
         else:
             self.empty_visits += 1
+            if sb_detector:
+                sb_detector.add_empty_visit(self.account)
             if forts_seen == 0:
                 self.log.warning('Nothing seen by {}. Speed: {:.2f}', self.username, self.speed)
-                if sb_detector:
-                    sb_detector.add_empty_visit(self.account)
                 self.error_code = '0 SEEN'
             else:
                 self.error_code = ','

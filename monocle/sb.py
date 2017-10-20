@@ -89,7 +89,6 @@ class SbDetector:
             empty_visits = quarantine[SB_EMPTY_VISIT]
 
             try:
-                sbanned = None
                 if visits >= conf.SB_QUARANTINE_VISITS and empty_visits < sightings and sightings > 0 and uncommon <= 0:
                     raise SbAccountException("No uncommons seen after {} visits".format(conf.SB_QUARANTINE_VISITS))
 
