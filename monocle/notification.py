@@ -17,12 +17,15 @@ from .shared import get_logger, SessionManager, LOOP, run_threaded
 from . import sanitized as conf
 
 import os
+import operator
+import requests
 
 WEBHOOK = False
 if conf.NOTIFY:
     TWITTER = False
     PUSHBULLET = False
     TELEGRAM = False
+    DISCORD = False
 
     if all((conf.TWITTER_CONSUMER_KEY, conf.TWITTER_CONSUMER_SECRET,
             conf.TWITTER_ACCESS_KEY, conf.TWITTER_ACCESS_SECRET)):
@@ -48,6 +51,9 @@ if conf.NOTIFY:
             raise ImportError("You specified a PB_API_KEY but you don't have asyncpushbullet installed.") from e
         PUSHBULLET=True
 
+    if conf.NOTIFY_POKEMON_ALARMS:
+        if 'discord' in conf.NOTIFY_POKEMON_ALARMS:
+            DISCORD = True
     if conf.WEBHOOKS:
         from aiopogo import json_dumps, json_loads
 
@@ -61,7 +67,7 @@ if conf.NOTIFY:
     if conf.TELEGRAM_BOT_TOKEN and conf.TELEGRAM_CHAT_ID:
         TELEGRAM=True
 
-    NATIVE = TWITTER or PUSHBULLET or TELEGRAM
+    NATIVE = TWITTER or PUSHBULLET or TELEGRAM or DISCORD
 
     if not (NATIVE or WEBHOOK):
         raise ValueError('NOTIFY is enabled but no keys or webhook address were provided.')
@@ -232,12 +238,11 @@ class Notification:
         self.time_of_day = time_of_day
         self.log = get_logger('notifier')
         self.description = 'wild'
-        try:
-            self.move1 = MOVES[pokemon['move_1']]
-            self.move2 = MOVES[pokemon['move_2']]
-        except KeyError:
-            self.move1 = None
-            self.move2 = None
+        self.move_1 = pokemon.get('move_1')
+        self.move_2 = pokemon.get('move_2')
+        # Translate them:
+        self.move_1 = MOVES[self.move_1] if self.move_1 is not None else None
+        self.move_2 = MOVES[self.move_2] if self.move_2 is not None else None
 
         try:
             if 'raid' in pokemon:
@@ -280,9 +285,9 @@ class Notification:
             if (self.earliest.minute == self.latest.minute
                     and self.earliest.hour == self.latest.hour):
                 self.tth = (self.earliest_tth + self.latest_tth) / 2
-                self.delta = timedelta(seconds=self.tth)
+                delta = timedelta(seconds=self.tth)
                 self.expire_time = (
-                    now + self.delta).strftime('%I:%M %p').lstrip('0')
+                    now + delta).strftime('%I:%M %p').lstrip('0')
             else:
                 self.min_expire_time = (
                     now + min_delta).strftime('%I:%M').lstrip('0')
@@ -303,17 +308,13 @@ class Notification:
         except AttributeError:
             self.place = self.generic_place_string()
 
-        if PUSHBULLET or TELEGRAM:
+        if PUSHBULLET or TELEGRAM or DISCORD:
             try:
                 self.attack = self.pokemon['individual_attack']
                 self.defense = self.pokemon['individual_defense']
                 self.stamina = self.pokemon['individual_stamina']
             except KeyError:
                 pass
-
-        tweeted = False
-        pushed = False
-        telegram = False
 
         notifications = []
         if PUSHBULLET:
@@ -324,6 +325,9 @@ class Notification:
 
         if TELEGRAM:
             notifications.append(self.sendToTelegram())
+
+        if DISCORD:
+            notifications.append(self.notify_discord_pokemon())
 
         results = await gather(*notifications, loop=LOOP)
         return True in results
@@ -548,6 +552,130 @@ class Notification:
                 image.close()
             except AttributeError:
                 pass
+
+    def get_static_map_url(self, lat, lon, icon=None):
+        center = '{},{}'.format(lat, lon)
+        query_center = 'center={}'.format(center)
+        query_markers = 'markers=color:red%7C{}'.format(center)
+        query_size = 'size={}x{}'.format('250', '125')
+        query_zoom = 'zoom={}'.format('15')
+        query_maptype = 'maptype={}'.format('roadmap')
+
+        url = ('https://maps.googleapis.com/maps/api/staticmap?' +
+                query_center + '&' + query_markers + '&' +
+                query_maptype + '&' + query_size + '&' + query_zoom)
+        if icon is not None:
+            url += "&format=png&visual_refresh=true&markers=icon:{icon_url}|{lat},{lon}".format(
+                icon_url = icon,
+                lat = lat,
+                lon = lon)
+        return url
+
+    async def notify_discord_pokemon(self):
+        pokemon = self.pokemon
+        raw_expire_time = pokemon.get('expire_timestamp')
+        expire_time = datetime.fromtimestamp(raw_expire_time) if raw_expire_time else raw_expire_time
+        poke_id = self.pokemon.get('pokemon_id')
+        icon_url = conf.ICONS_URL.format(poke_id)
+        form = pokemon.get('form', '?')
+        gender = pokemon.get('gender', '?')
+        height = pokemon.get('height', '?')
+        weight = pokemon.get('weight', '?')
+        move_1 = pokemon.get('move_1', '?')
+        move_2 = pokemon.get('move_2', '?')
+        iv_atk = pokemon.get('individual_attack', '?')
+        iv_def = pokemon.get('individual_defense', '?')
+        iv_sta = pokemon.get('individual_stamina', '?')
+        lat = pokemon.get('lat', '?')
+        lon = pokemon.get('lon', '?')
+        cp = pokemon.get('cp', '?')
+        lvl = pokemon.get('level', '?')
+        if gender == 1:
+            gender = u'\u2642'  # male symbol
+        elif gender == 2:
+            gender= u'\u2640'  # female symbol
+        elif gender == 3:
+            gender = u'\u26b2'  #neutral
+        if height != "?":
+            height = round(height, 2)
+        if weight != "?":
+            weight = round(weight, 2)
+
+        # translate to name
+        move_1 = MOVES[move_1] if move_1 != '?' else move_1
+        move_2 = MOVES[move_2] if move_2 != '?' else move_2
+        iv_unknown = '?' in [iv_atk, iv_def, iv_sta]
+        if iv_unknown:
+            iv = '?'
+        else:
+            iv = "{0:.2f}".format(
+                round(
+                    (((iv_atk + iv_def + iv_sta) / 45) * 100), 2))
+        for disc_alarm in conf.NOTIFY_POKEMON_ALARMS['discord']:
+            filter_ids = disc_alarm.get('filter_ids', list())
+            filter_ivs = disc_alarm.get('filter_ivs', dict())
+            if filter_ids and (poke_id not in filter_ids):
+                continue
+            else:
+                def insert_data(text):
+                    #address = "https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lon}&output=json&sensor=true_or_false".format(lat, lon)
+                    disappear_time = expire_time.strftime("%H:%M") if expire_time else "??:??"
+                    tl_seconds = (expire_time - datetime.now()).seconds
+                    time_left = "{}min {}sec".format(
+                        tl_seconds // 60, tl_seconds % 60)
+                    return text.format(
+                        poke_id = poke_id,
+                        poke_name = self.name,
+#                        map_link = self.map_link,
+                        disappear_time = disappear_time,
+                        time_left = time_left,
+                        poke_iv = iv,
+                        poke_form = form,
+                        poke_gender = gender,
+                        poke_height = height,
+                        poke_weight = weight,
+                        poke_move_1 = move_1,
+                        poke_move_2 = move_2,
+                        poke_lvl = lvl,
+                        poke_cp = cp,
+                        poke_atk = iv_atk,
+                        poke_def = iv_def,
+                        poke_sta = iv_sta)
+
+                title = insert_data(disc_alarm['title'])
+                text = insert_data(disc_alarm['description'])
+
+                payload = {
+                    #'username': disc_alarm['username'],
+                    # Not sure to implement, because can lead to errors,
+                    # because not all special charsa are allowed
+                    'username': "Poke Bot",
+                    'embeds': [{
+                        'title': title,
+                        'url': "http://maps.google.com/maps?q={},{}".format(lat, lon),
+                        'description': text,
+                        'thumbnail': {'url': icon_url},
+                        'image': {'url': self.get_static_map_url(lat, lon, icon=icon_url)}
+                    }]
+                }
+                if filter_ivs:
+                    ignore_unknown = disc_alarm['filter_ivs']['ignore_unknown']
+                    if iv_unknown and ignore_unknown:
+                        continue
+                    elif iv_unknown and not ignore_unknown:
+                        requests.post(disc_alarm['webhook_url'], json=payload)
+                        continue
+                    op_dic = {'>': 'gt', '>=': 'ge', '<': 'lt', '<=': 'le', '==': 'eq'}
+                    op = getattr(operator, op_dic[filter_ivs['op']])
+                    if op and op(float(iv), filter_ivs['value']):
+                        requests.post(disc_alarm['webhook_url'], json=payload)
+                        continue
+                    else:
+                        continue
+                else:
+                    requests.post(disc_alarm['webhook_url'], json=payload)
+                    continue
+
 
     @staticmethod
     def generic_place_string():
@@ -846,6 +974,13 @@ class Notifier:
             self.sent += 1
 
     async def notify_raid_to_discord(self, fort):
+        #advanced gym_infos
+        gym_name = "Unknown"
+        with session_scope() as gym_session:
+            gym = get_gym(gym_session, fort)
+            if gym:
+                gym_name = gym.name
+
         raid = fort.raid_info
 
         if raid.raid_pokemon.pokemon_id not in conf.RAIDS_IDS:
@@ -856,13 +991,41 @@ class Notifier:
         timer_end = datetime.fromtimestamp(tth, None)
         time_left = timedelta(seconds=tth - time())
 
+        if fort.owned_by_team == 1:
+            team = "Mystic (blue)"
+        elif fort.owned_by_team == 2:
+            team = "Valor (red)"
+        elif fort.owned_by_team == 3:
+            team = "Instinct (yellow)"
+        else:
+            team = "No Team"
+
+        if raid.raid_pokemon.pokemon_id == 0:
+            title = 'A Level {} Egg appeared'.format(raid.raid_level)
+            text = "Arena: {}".format(gym_name)
+        else:
+            title = 'A {} Raid (Level {}) hatched'.format(
+                POKEMON[raid.raid_pokemon.pokemon_id], raid.raid_level)
+            text = """Gym: {}
+Until: {} ({}h {}mn {}s)
+Owned by Team: **{}**
+Pokemon: **{}**
+Attacks: **{}** / **{}**
+Gym-Picture: {}""".format(
+                gym_name,
+                timer_end.strftime("%H:%M:%S"), time_left.seconds // 3600, (time_left.seconds // 60) % 60, time_left.seconds % 60,
+                team,
+                POKEMON[raid.raid_pokemon.pokemon_id],
+                MOVES[raid.raid_pokemon.move_1], MOVES[raid.raid_pokemon.move_2],
+                fort.image_url)
+
         payload = {
             'username': 'Egg' if raid.raid_pokemon.pokemon_id == 0 else POKEMON[raid.raid_pokemon.pokemon_id],
             'embeds': [{
-                'title': 'Raid{}'.format(raid.raid_level),
+                'title': title,
                 'url': self.get_gmaps_link(fort.latitude, fort.longitude),
-                'description': '{} ({}h {}mn {}s)'.format(timer_end.strftime("%H:%M:%S"), time_left.seconds // 3600, (time_left.seconds // 60) % 60, time_left.seconds % 60),
-                'thumbnail': {'url': conf.ICONS_URL.format(raid.raid_pokemon.pokemon_id)},
+                'description': text,
+                'thumbnail': {'url': fort.image_url},
                 'image': {'url': self.get_static_map_url(fort.latitude, fort.longitude)}
             }]
         }

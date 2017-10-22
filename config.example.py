@@ -376,6 +376,40 @@ ALWAYS_NOTIFY = 14
 # Ignore rarity score and only base decision on IV score
 #IGNORE_RARITY = False
 
+#NOTIFY_POKEMON_ALARMS = {
+#    'discord': [
+#        {
+#            'name': 'filter pokemon ids',
+#            'username': 'poke-bot',
+#            'title': 'A wild {poke_name} {poke_iv}% (lvl {poke_lvl} | {poke_cp}WP) ({poke_atk}/{poke_def}/{poke_sta}) appeared',
+#            'description': """Until {disappear_time} ({time_left} left)
+#IV: {poke_iv}% ({poke_atk}/{poke_def}/{poke_sta})
+#CP: {poke_cp}  |  Level: {poke_lvl}
+#Attacks: {poke_move_1} / {poke_move_2}
+#Gender: {poke_gender} | Weight: {poke_weight} kg | Height: {poke_height} m""",
+#            'filter_ids': [1,2,3,4,5,6,8,9,246,247,248],
+#            'webhook_url': 'YOUR DISCORDCHANNEL WEBHOOK',
+#            'avatar_url': ICONS_URL,
+#            'icon_url': ICONS_URL
+#        },
+#        {
+#            'name': 'filter pokemon ivs',
+#            'username': 'iv-95-bot',
+#            'description': """Until {disappear_time} ({time_left} left)
+#IV: {poke_iv}% ({poke_atk}/{poke_def}/{poke_sta})
+#CP: {poke_cp}  |  Level: {poke_lvl}
+#Attacks: {poke_move_1} / {poke_move_2}
+#Gender: {poke_gender} | Weight: {poke_weight} kg | Height: {poke_height} m""",
+#
+#            'filter_ivs': {'op': '>=', 'value': 95, 'ignore_unknown': True},
+#            'webhook_url': 'YOUR DISCORDCHANNEL WEBHOOK',
+#            'avatar_url': ICONS_URL,
+#            'icon_url': ICONS_URL
+#        }
+#    ]
+#}
+
+
 # The Pokémon score required to notify goes on a sliding scale from INITIAL_SCORE
 # to MINIMUM_SCORE over the course of FULL_TIME seconds following a notification
 # Pokémon scores are an average of the Pokémon's rarity score and IV score (from 0 to 1)
