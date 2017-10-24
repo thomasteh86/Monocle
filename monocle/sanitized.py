@@ -113,6 +113,7 @@ _valid_types = {
     'NO_DB_INSERT_IDS': set_sequence_range,
     'NOTIFY': bool,
     'NOTIFY_POKEMON_ALARMS': dict,
+    'DEFAULT_ALARM': dict,
     'NOTIFY_RAIDS': bool,
     'NOTIFY_RAIDS_WEBHOOK': bool,
     'NOTIFY_IDS': set_sequence_range,

@@ -376,17 +376,41 @@ ALWAYS_NOTIFY = 14
 # Ignore rarity score and only base decision on IV score
 #IGNORE_RARITY = False
 
-#NOTIFY_POKEMON_ALARMS = {
-#    'discord': [
-#        {
-#            'name': 'filter pokemon ids',
-#            'username': 'poke-bot',
+
+
+
+#######################################################
+## NOTIFY POKEMON
+##
+## If some values are left out,
+## Monocle uses the values of DEFAULT_ALARM
+##
+## So either set all values or delete the '#' signs
+## infront of the DEFAULT_ALARM lines
+#######################################################
+
+#ICONS_URL = "https://raw.githubusercontent.com/ZeChrales/monocle-icons/larger-outlined/larger-icons/{}.png"
+
+#DEFAULT_ALARM = {
+#            'username': '{poke_name}',
 #            'title': 'A wild {poke_name} {poke_iv}% (lvl {poke_lvl} | {poke_cp}WP) ({poke_atk}/{poke_def}/{poke_sta}) appeared',
 #            'description': """Until {disappear_time} ({time_left} left)
 #IV: {poke_iv}% ({poke_atk}/{poke_def}/{poke_sta})
 #CP: {poke_cp}  |  Level: {poke_lvl}
 #Attacks: {poke_move_1} / {poke_move_2}
 #Gender: {poke_gender} | Weight: {poke_weight} kg | Height: {poke_height} m""",
+#            'color': 'BLUE', # RED/AQUA/GREEN/BLUE/GOLD/ORANGE/RED/GREY/NAVY
+#            'avatar_url': ICONS_URL,
+#            'icon_url': ICONS_URL
+#}
+
+
+#NOTIFY_POKEMON_ALARMS = {
+#    'discord': [
+#        {
+#            'name': 'filter pokemon ids',
+#            'title': 'A wild {poke_name} {poke_iv}% (lvl {poke_lvl} | {poke_cp}WP) ({poke_atk}/{poke_def}/{poke_sta}) appeared',
+#            'description': """Until {disappear_time} ({time_left} left)""",
 #            'filter_ids': [1,2,3,4,5,6,8,9,246,247,248],
 #            'webhook_url': 'YOUR DISCORDCHANNEL WEBHOOK',
 #            'avatar_url': ICONS_URL,
@@ -395,16 +419,16 @@ ALWAYS_NOTIFY = 14
 #        {
 #            'name': 'filter pokemon ivs',
 #            'username': 'iv-95-bot',
-#            'description': """Until {disappear_time} ({time_left} left)
-#IV: {poke_iv}% ({poke_atk}/{poke_def}/{poke_sta})
-#CP: {poke_cp}  |  Level: {poke_lvl}
-#Attacks: {poke_move_1} / {poke_move_2}
-#Gender: {poke_gender} | Weight: {poke_weight} kg | Height: {poke_height} m""",
-#
-#            'filter_ivs': {'op': '>=', 'value': 95, 'ignore_unknown': True},
+#            'filter_ivs': {'value': 95, 'op': '>=', 'ignore_unknown': True},
 #            'webhook_url': 'YOUR DISCORDCHANNEL WEBHOOK',
-#            'avatar_url': ICONS_URL,
-#            'icon_url': ICONS_URL
+#        },
+#        {
+#            'name': 'combined filter ivs and ids',
+#            'username': 'iv-95-bot',
+#            'filter_ids': [1,2,3,4,5,6,8,9,246,247,248],
+#            'filter_ivs': {'value': 95, 'op': '>=', 'ignore_unknown': True},
+#            'webhook_url': 'YOUR DISCORDCHANNEL WEBHOOK',
+#            'color': 'RED',
 #        }
 #    ]
 #}
@@ -453,8 +477,6 @@ MINIMUM_SCORE = 0.4  # the required score after FULL_TIME seconds have passed
 #RAIDS_IDS = {143, 248}
 #RAIDS_DISCORD_URL = "https://discordapp.com/api/webhooks/xxxxxxxxxxxx/xxxxxxxxxxxx"
 #TELEGRAM_RAIDS_CHAT_ID = '@your_channel'
-
-#ICONS_URL = "https://raw.githubusercontent.com/ZeChrales/monocle-icons/larger-outlined/larger-icons/{}.png"
 
 #WEBHOOKS = {'http://127.0.0.1:4000'}
 

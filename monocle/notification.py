@@ -238,11 +238,6 @@ class Notification:
         self.time_of_day = time_of_day
         self.log = get_logger('notifier')
         self.description = 'wild'
-        self.move_1 = pokemon.get('move_1')
-        self.move_2 = pokemon.get('move_2')
-        # Translate them:
-        self.move_1 = MOVES[self.move_1] if self.move_1 is not None else None
-        self.move_2 = MOVES[self.move_2] if self.move_2 is not None else None
 
         try:
             if 'raid' in pokemon:
@@ -581,8 +576,8 @@ class Notification:
         gender = pokemon.get('gender', '?')
         height = pokemon.get('height', '?')
         weight = pokemon.get('weight', '?')
-        move_1 = pokemon.get('move_1', '?')
-        move_2 = pokemon.get('move_2', '?')
+        move_1 = pokemon.get('move_1')
+        move_2 = pokemon.get('move_2')
         iv_atk = pokemon.get('individual_attack', '?')
         iv_def = pokemon.get('individual_defense', '?')
         iv_sta = pokemon.get('individual_stamina', '?')
@@ -602,8 +597,8 @@ class Notification:
             weight = round(weight, 2)
 
         # translate to name
-        move_1 = MOVES[move_1] if move_1 != '?' else move_1
-        move_2 = MOVES[move_2] if move_2 != '?' else move_2
+        move_1_name = MOVES[move_1] if move_1 else '?'
+        move_2_name = MOVES[move_2] if move_2 else '?'
         iv_unknown = '?' in [iv_atk, iv_def, iv_sta]
         if iv_unknown:
             iv = '?'
@@ -614,6 +609,26 @@ class Notification:
         for disc_alarm in conf.NOTIFY_POKEMON_ALARMS['discord']:
             filter_ids = disc_alarm.get('filter_ids', list())
             filter_ivs = disc_alarm.get('filter_ivs', dict())
+            username = disc_alarm.get('username', conf.DEFAULT_ALARM['username'])
+            title = disc_alarm.get('title', conf.DEFAULT_ALARM['title'])
+            description = disc_alarm.get('description', conf.DEFAULT_ALARM['description'])
+            avatar_url = disc_alarm.get('avatar_url', conf.DEFAULT_ALARM['avatar_url'])
+            icon_url = disc_alarm.get('icon_url', conf.DEFAULT_ALARM['icon_url'])
+            color_name = disc_alarm.get('color', conf.DEFAULT_ALARM['color'])
+            color_dict = {
+                'DEFAULT': 0,
+                'AQUA': 1752220,
+                'GREEN': 3066993,
+                'BLUE': 3447003,
+                'PURPLE': 10181046,
+                'GOLD': 15844367,
+                'ORANGE': 15105570,
+                'RED': 15158332,
+                'GREY': 9807270,
+                'NAVY': 3426654
+            }
+            color = color_dict.get(color_name, 0)
+
             if filter_ids and (poke_id not in filter_ids):
                 continue
             else:
@@ -634,46 +649,49 @@ class Notification:
                         poke_gender = gender,
                         poke_height = height,
                         poke_weight = weight,
-                        poke_move_1 = move_1,
-                        poke_move_2 = move_2,
+                        poke_move_1 = move_1_name,
+                        poke_move_2 = move_2_name,
                         poke_lvl = lvl,
                         poke_cp = cp,
                         poke_atk = iv_atk,
                         poke_def = iv_def,
                         poke_sta = iv_sta)
 
-                title = insert_data(disc_alarm['title'])
-                text = insert_data(disc_alarm['description'])
+                title = insert_data(title)
+                text = insert_data(description)
+                username = insert_data(username)
 
                 payload = {
-                    #'username': disc_alarm['username'],
-                    # Not sure to implement, because can lead to errors,
-                    # because not all special charsa are allowed
-                    'username': "Poke Bot",
+                    'username': username,
+                    'avatar_url': icon_url,
                     'embeds': [{
                         'title': title,
                         'url': "http://maps.google.com/maps?q={},{}".format(lat, lon),
                         'description': text,
                         'thumbnail': {'url': icon_url},
+                        'color': color,
                         'image': {'url': self.get_static_map_url(lat, lon, icon=icon_url)}
                     }]
                 }
+                def send_discord(webhook_url, payload):
+                    req = requests.post(webhook_url, json=payload)
+                    if not req.ok:
+                        self.log.warning("Notification could not be send: {}".format(req.reason))
+                        self.log.warning("Notification : {}".format(req.text))
                 if filter_ivs:
                     ignore_unknown = disc_alarm['filter_ivs']['ignore_unknown']
                     if iv_unknown and ignore_unknown:
                         continue
                     elif iv_unknown and not ignore_unknown:
-                        requests.post(disc_alarm['webhook_url'], json=payload)
+                        send_discord(disc_alarm['webhook_url'], payload)
                         continue
                     op_dic = {'>': 'gt', '>=': 'ge', '<': 'lt', '<=': 'le', '==': 'eq'}
                     op = getattr(operator, op_dic[filter_ivs['op']])
                     if op and op(float(iv), filter_ivs['value']):
-                        requests.post(disc_alarm['webhook_url'], json=payload)
-                        continue
-                    else:
+                        send_discord(disc_alarm['webhook_url'], payload)
                         continue
                 else:
-                    requests.post(disc_alarm['webhook_url'], json=payload)
+                    send_discord(disc_alarm['webhook_url'], payload)
                     continue
 
 
