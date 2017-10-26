@@ -628,6 +628,8 @@ class Notification:
                 'NAVY': 3426654
             }
             color = color_dict.get(color_name, 0)
+            avatar_url = avatar_url.format(poke_id)
+            icon_url = icon_url.format(poke_id)
 
             if filter_ids and (poke_id not in filter_ids):
                 continue
@@ -663,7 +665,7 @@ class Notification:
 
                 payload = {
                     'username': username,
-                    'avatar_url': icon_url,
+                    'avatar_url': avatar_url,
                     'embeds': [{
                         'title': title,
                         'url': "http://maps.google.com/maps?q={},{}".format(lat, lon),

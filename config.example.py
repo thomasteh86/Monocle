@@ -389,7 +389,11 @@ ALWAYS_NOTIFY = 14
 ## infront of the DEFAULT_ALARM lines
 #######################################################
 
+# copyright safe icons:
 #ICONS_URL = "https://raw.githubusercontent.com/ZeChrales/monocle-icons/larger-outlined/larger-icons/{}.png"
+
+# non copyright safe icons:
+#ICONS_URL = "https://raw.githubusercontent.com/PokeAlarm/PokeAlarm/master/icons/{}.png"
 
 #DEFAULT_ALARM = {
 #            'username': '{poke_name}',
