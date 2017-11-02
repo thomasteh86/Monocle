@@ -11,14 +11,13 @@ from aiohttp import ClientError, ClientResponseError, ServerTimeoutError
 from aiopogo import json_dumps, json_loads
 
 from .utils import load_pickle, dump_pickle
-from .db import session_scope, get_pokemon_ranking, estimate_remaining_time, FORT_CACHE
+from .db import session_scope, get_pokemon_ranking, get_gym, estimate_remaining_time, FORT_CACHE
 from .names import MOVES, POKEMON
 from .shared import get_logger, SessionManager, LOOP, run_threaded
 from . import sanitized as conf
 
 import os
 import operator
-import requests
 
 WEBHOOK = False
 if conf.NOTIFY:
@@ -82,6 +81,23 @@ if conf.NOTIFY:
         raise ValueError('Only set NOTIFY_RANKING or NOTIFY_IDS, not both.')
     elif not any((conf.NOTIFY_RANKING, conf.NOTIFY_IDS, conf.ALWAYS_NOTIFY_IDS)):
         raise ValueError('Must set either NOTIFY_RANKING, NOTIFY_IDS, or ALWAYS_NOTIFY_IDS.')
+
+
+async def hook_post(url, session, payload, logger, headers={'content-type': 'application/json'}, timeout=4):
+    try:
+        async with session.post(url, json=payload, timeout=timeout, headers=headers) as resp:
+            return True
+    except ClientResponseError as e:
+        logger.error('Error {} from wehbook {}: {}', e.code, url, e.message)
+    except (TimeoutError, ServerTimeoutError):
+        logger.error('Response timeout from webhook: {}', url)
+    except ClientError as e:
+        logger.error('{} on webhook: {}', e.__class__.__name__, url)
+    except CancelledError:
+        raise
+    except Exception:
+        logger.exception('Error from webhook: {}', url)
+    return False
 
 
 class NotificationCache:
@@ -675,25 +691,21 @@ class Notification:
                         'image': {'url': self.get_static_map_url(lat, lon, icon=icon_url)}
                     }]
                 }
-                def send_discord(webhook_url, payload):
-                    req = requests.post(webhook_url, json=payload)
-                    if not req.ok:
-                        self.log.warning("Notification could not be send: {}".format(req.reason))
-                        self.log.warning("Notification : {}".format(req.text))
+                session = SessionManager.get()
                 if filter_ivs:
                     ignore_unknown = disc_alarm['filter_ivs']['ignore_unknown']
                     if iv_unknown and ignore_unknown:
                         continue
                     elif iv_unknown and not ignore_unknown:
-                        send_discord(disc_alarm['webhook_url'], payload)
+                        await hook_post(disc_alarm['webhook_url'], session, payload, self.log)
                         continue
                     op_dic = {'>': 'gt', '>=': 'ge', '<': 'lt', '<=': 'le', '==': 'eq'}
                     op = getattr(operator, op_dic[filter_ivs['op']])
                     if op and op(float(iv), filter_ivs['value']):
-                        send_discord(disc_alarm['webhook_url'], payload)
+                        await hook_post(disc_alarm['webhook_url'], session, payload, self.log)
                         continue
                 else:
-                    send_discord(disc_alarm['webhook_url'], payload)
+                    await hook_post(disc_alarm['webhook_url'], session, payload, self.log)
                     continue
 
 
@@ -977,108 +989,139 @@ class Notifier:
             }
 
             session = SessionManager.get()
-            return await self.hook_post(conf.SCAN_LOG_WEBHOOK, session, payload)
+            return await hook_post(conf.SCAN_LOG_WEBHOOK, session, payload, self.log)
         else:
             return
 
 
-    async def notify_raid(self, fort):
+    async def notify_raid(self, raid, fort):
         discord = False
         telegram = False
-        if conf.RAIDS_DISCORD_URL:
-            discord = await self.notify_raid_to_discord(fort)
+
+        move_1 = raid['move_1']
+        move_2 = raid['move_2']
+        # translate to name
+        raid['move_1_name'] = MOVES[move_1] if move_1 else '?'
+        raid['move_2_name'] = MOVES[move_2] if move_2 else '?'
+        if raid['fort_external_id'] in FORT_CACHE.gym_names:
+            test = FORT_CACHE.gym_names[raid['fort_external_id']]
+            gym_name, gym_url = test
+            fort['name'] = gym_name
+            fort['url'] = gym_url
+        else:
+            async with self.db_access_lock:
+                with session_scope() as gym_session:
+                    gym = get_gym(gym_session, fort)
+                    if gym:
+                        fort['name'] = gym.name
+                        fort['url'] = gym.url
+        # Team
+        if fort['team'] == 1:
+            fort['team_name'] = "Mystic (blue)"
+        elif fort['team'] == 2:
+            fort['team_name'] = "Valor (red)"
+        elif fort['team'] == 3:
+            fort['team_name'] = "Instinct (yellow)"
+        else:
+            fort['team_name'] = "No Team"
+        if conf.DEFAULT_EGG_ALARM or conf.DEFAULT_RAID_ALARM:
+            discord = await self.notify_raid_to_discord(raid, fort)
         if conf.TELEGRAM_BOT_TOKEN and conf.TELEGRAM_RAIDS_CHAT_ID:
-            telegram = await self.notify_raid_to_telegram(fort)
+            telegram = await self.notify_raid_to_telegram(raid, fort)
         if discord or telegram:
             self.last_notification = monotonic()
             self.sent += 1
 
-    async def notify_raid_to_discord(self, fort):
-        #advanced gym_infos
-        gym_name = "Unknown"
-        with session_scope() as gym_session:
-            gym = get_gym(gym_session, fort)
-            if gym:
-                gym_name = gym.name
+    async def notify_raid_to_discord(self, raid, fort):
+        if raid['pokemon_id'] not in conf.RAIDS_IDS:
+            if raid['level'] < conf.RAIDS_LVL_MIN:
+                return False
 
-        raid = fort.raid_info
-
-        if raid.raid_pokemon.pokemon_id not in conf.RAIDS_IDS:
-            if raid.raid_level < conf.RAIDS_LVL_MIN:
-                return
-
-        tth = raid.raid_battle_ms // 1000 if raid.raid_pokemon.pokemon_id == 0 else raid.raid_end_ms // 1000
+        tth = raid['time_battle'] if raid['pokemon_id'] == 0 else raid['time_end']
         timer_end = datetime.fromtimestamp(tth, None)
         time_left = timedelta(seconds=tth - time())
 
-        if fort.owned_by_team == 1:
-            team = "Mystic (blue)"
-        elif fort.owned_by_team == 2:
-            team = "Valor (red)"
-        elif fort.owned_by_team == 3:
-            team = "Instinct (yellow)"
-        else:
-            team = "No Team"
 
-        if raid.raid_pokemon.pokemon_id == 0:
-            title = 'A Level {} Egg appeared'.format(raid.raid_level)
-            text = "Arena: {}".format(gym_name)
+        def insert_data(text):
+            return text.format(
+#                timer_end.strftime("%H:%M:%S"), time_left.seconds // 3600, (time_left.seconds // 60) % 60, time_left.seconds % 60,
+                level = raid['level'],
+                gym_name = fort['name'],
+                gym_pic = fort['url'],
+                poke_id = raid['pokemon_id'],
+                poke_name = POKEMON[raid['pokemon_id']],
+                raid_end = datetime.fromtimestamp(raid['time_end']).strftime("%H:%M"),
+                time_battle = datetime.fromtimestamp(raid['time_battle']).strftime("%H:%M"),
+                team = fort['team_name'],
+                move_1 = raid['move_1_name'],
+                move_2 = raid['move_2_name']
+        )
+        if raid['pokemon_id'] == 0:
+            if not conf.DEFAULT_EGG_ALARM:
+                return False
+            username = insert_data(conf.DEFAULT_EGG_ALARM['username'])
+            title = insert_data(conf.DEFAULT_EGG_ALARM['title'])
+            description = insert_data(conf.DEFAULT_EGG_ALARM['description'])
+            discord_url = conf.DEFAULT_EGG_ALARM['discord_url']
         else:
-            title = 'A {} Raid (Level {}) hatched'.format(
-                POKEMON[raid.raid_pokemon.pokemon_id], raid.raid_level)
-            text = """Gym: {}
-Until: {} ({}h {}mn {}s)
-Owned by Team: **{}**
-Pokemon: **{}**
-Attacks: **{}** / **{}**
-Gym-Picture: {}""".format(
-                gym_name,
-                timer_end.strftime("%H:%M:%S"), time_left.seconds // 3600, (time_left.seconds // 60) % 60, time_left.seconds % 60,
-                team,
-                POKEMON[raid.raid_pokemon.pokemon_id],
-                MOVES[raid.raid_pokemon.move_1], MOVES[raid.raid_pokemon.move_2],
-                fort.image_url)
+            if not conf.DEFAULT_RAID_ALARM:
+                return False
+            username = insert_data(conf.DEFAULT_RAID_ALARM['username'])
+            title = insert_data(conf.DEFAULT_RAID_ALARM['title'])
+            description = insert_data(conf.DEFAULT_RAID_ALARM['description'])
+            discord_url = conf.DEFAULT_RAID_ALARM['discord_url']
 
         payload = {
-            'username': 'Egg' if raid.raid_pokemon.pokemon_id == 0 else POKEMON[raid.raid_pokemon.pokemon_id],
+            'username': username,
             'embeds': [{
                 'title': title,
-                'url': self.get_gmaps_link(fort.latitude, fort.longitude),
-                'description': text,
-                'thumbnail': {'url': fort.image_url},
-                'image': {'url': self.get_static_map_url(fort.latitude, fort.longitude)}
+                'url': self.get_gmaps_link(fort['lat'], fort['lon']),
+                'description': description,
+                'thumbnail': {'url': fort['url']},
+                'image': {'url': self.get_static_map_url(fort['lat'], fort['lon'])}
             }]
         }
-
         session = SessionManager.get()
-        return await self.hook_post(conf.RAIDS_DISCORD_URL, session, payload)
+        return await hook_post(discord_url, session, payload, self.log)
 
-    async def notify_raid_to_telegram(self, fort):
-        raid = fort.raid_info
+    async def notify_raid_to_telegram(self, raid, fort):
 
-        if raid.raid_pokemon.pokemon_id not in conf.RAIDS_IDS:
-            if raid.raid_level < conf.RAIDS_LVL_MIN:
+        if raid['pokemon_id'] not in conf.RAIDS_IDS:
+            if raid['level'] < conf.RAIDS_LVL_MIN:
                 return
 
         
-        title = '[Raid lvl.{}] {}'.format(raid.raid_level, 'Egg' if raid.raid_pokemon.pokemon_id == 0 else POKEMON[raid.raid_pokemon.pokemon_id])
-        tth = raid.raid_battle_ms // 1000 if raid.raid_pokemon.pokemon_id == 0 else raid.raid_end_ms // 1000
+        title = '[Raid lvl.{}] {}'.format(raid['level'], 'Egg' if raid['pokemon_id'] == 0 else POKEMON[raid['pokemon_id']])
+        tth = raid['time_battle'] if raid['pokemon_id'] == 0 else raid['time_end']
         timer_end = datetime.fromtimestamp(tth, None)
         time_left = timedelta(seconds=tth - time())
-        description = '{} ({}h {}mn {}s)'.format(timer_end.strftime("%H:%M:%S"), time_left.seconds // 3600, (time_left.seconds // 60) % 60, time_left.seconds % 60)
+        description = """Arena: {}
+{} ({}h {}mn {}s)
+Controlley by: {}
+Pokemon: {}
+Attacks: {}/{}""".format(
+            fort['name'],
+            [timer_end.strftime("%H:%M:%S"),
+            time_left.seconds // 3600,
+            (time_left.seconds // 60) % 60,
+            time_left.seconds % 60,
+            fort['team_name'],
+            POKEMON[raid['pokemon_id']],
+            move_1 = raid['move_1_name'],
+            move_2 = raid['move_2_name'])
 
         if conf.TELEGRAM_MESSAGE_TYPE == 0:
             TELEGRAM_BASE_URL = "https://api.telegram.org/bot{token}/sendVenue".format(token=conf.TELEGRAM_BOT_TOKEN)
             payload = {
                 'chat_id': conf.TELEGRAM_RAIDS_CHAT_ID,
-                'latitude': fort.latitude,
-                'longitude': fort.longitude,
+                'latitude': fort['lat'],
+                'longitude': fort['lon'],
                 'title' : title,
                 'address' : description,
             }
         else:
             TELEGRAM_BASE_URL = "https://api.telegram.org/bot{token}/sendMessage".format(token=conf.TELEGRAM_BOT_TOKEN)
-            map_link = '<a href="{}">Open GMaps</a>'.format(self.get_gmaps_link(fort.latitude, fort.longitude))
+            map_link = '<a href="{}">Open GMaps</a>'.format(self.get_gmaps_link(fort['lat'], fort['lon']))
             payload = {
                 'chat_id': conf.TELEGRAM_RAIDS_CHAT_ID,
                 'parse_mode': 'HTML',
@@ -1086,7 +1129,7 @@ Gym-Picture: {}""".format(
             }
         
         session = SessionManager.get()
-        return await self.hook_post(TELEGRAM_BASE_URL, session, payload, timeout=8)
+        return await hook_post(TELEGRAM_BASE_URL, session, payload, self.log, timeout=8)
 
     def get_gmaps_link(self, lat, lng):
         return 'http://maps.google.com/maps?q={},{}'.format(repr(lat), repr(lng))
@@ -1145,25 +1188,10 @@ Gym-Picture: {}""".format(
 
     if WEBHOOK > 1:
         async def wh_send(self, session, payload):
-            results = await gather(*tuple(self.hook_post(w, session, payload) for w in HOOK_POINTS), loop=LOOP)
+            results = await gather(*tuple(hook_post(w, session, payload, self.log) for w in HOOK_POINTS), loop=LOOP)
             return True in results
     else:
         async def wh_send(self, session, payload):
-            return await self.hook_post(HOOK_POINT, session, payload)
+            return await hook_post(HOOK_POINT, session, payload, self.log)
 
 
-    async def hook_post(self, w, session, payload, headers={'content-type': 'application/json'}, timeout=4):
-        try:
-            async with session.post(w, json=payload, timeout=timeout, headers=headers) as resp:
-                return True
-        except ClientResponseError as e:
-            self.log.error('Error {} from webook {}: {}', e.code, w, e.message)
-        except (TimeoutError, ServerTimeoutError):
-            self.log.error('Response timeout from webhook: {}', w)
-        except ClientError as e:
-            self.log.error('{} on webhook: {}', e.__class__.__name__, w)
-        except CancelledError:
-            raise
-        except Exception:
-            self.log.exception('Error from webhook: {}', w)
-        return False

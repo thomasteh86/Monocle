@@ -479,6 +479,31 @@ MINIMUM_SCORE = 0.4  # the required score after FULL_TIME seconds have passed
 #NOTIFY_RAIDS = False # Enable raid notifications. Default False
 #RAIDS_LVL_MIN = 1
 #RAIDS_IDS = {143, 248}
+
+
+#DEFAULT_EGG_ALARM = {
+#            'username': 'Egg Bot',
+#            'title': 'A Level {level} Egg appeared',
+#            'description': """It hatches at {time_battle}
+#Raid ends at: {raid_end}""",
+#            'color': 'GREY', # RED/AQUA/GREEN/BLUE/GOLD/ORANGE/RED/GREY/NAVY
+#            'discord_url': 'https://discordapp.com/api/webhooks/xxxxxxxxxxxxx/xxxxxxxxxxxxxxx'
+#}
+#
+#DEFAULT_RAID_ALARM = {
+#            'username': 'Raid Bot',
+#            'title': 'A {poke_name} Raid (Level {level}) hetched',
+#            'description': """Gym: {gym_name}
+#Until: {raid_end}
+#controlled by: **Team {team}**
+#Pokemon: **{poke_name}**
+#Attacks: **{move_1}** / **{move_2}**
+#Gym-pic: {gym_pic}""",
+#            'color': 'BLUE', # RED/AQUA/GREEN/BLUE/GOLD/ORANGE/RED/GREY/NAVY
+#            'discord_url': 'https://discordapp.com/api/webhooks/xxxxxxxxxxxxx/xxxxxxxxxxxxxxx'
+#}
+
+
 #RAIDS_DISCORD_URL = "https://discordapp.com/api/webhooks/xxxxxxxxxxxx/xxxxxxxxxxxx"
 #TELEGRAM_RAIDS_CHAT_ID = '@your_channel'
 
