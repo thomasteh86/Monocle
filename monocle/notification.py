@@ -1101,14 +1101,14 @@ Controlley by: {}
 Pokemon: {}
 Attacks: {}/{}""".format(
             fort['name'],
-            [timer_end.strftime("%H:%M:%S"),
+            timer_end.strftime("%H:%M:%S"),
             time_left.seconds // 3600,
             (time_left.seconds // 60) % 60,
             time_left.seconds % 60,
             fort['team_name'],
             POKEMON[raid['pokemon_id']],
-            move_1 = raid['move_1_name'],
-            move_2 = raid['move_2_name'])
+            raid['move_1_name'],
+            raid['move_2_name'])
 
         if conf.TELEGRAM_MESSAGE_TYPE == 0:
             TELEGRAM_BASE_URL = "https://api.telegram.org/bot{token}/sendVenue".format(token=conf.TELEGRAM_BOT_TOKEN)
